@@ -1,25 +1,39 @@
 // ColorfulTriangle - draw RGB triangle using glDrawElements
-// 2-Assn-RotateLetter.cpp, Saxton van Dalsen, 2 Rotate 2D Letter, 2026-04-12
+// 3-Assn-Shade3DLetter.cpp, Saxton van Dalsen, 3 Shade 3D Letter, 2026-04-17
 
 #include <glad.h>
 #include <glfw3.h>
 #include "GLXtras.h"
 #include "VecMat.h"
+#include "IO.h"
+#include "Camera.h"
+#include "Draw.h"
+#include "Text.h"
 
 // GPU identifiers
 GLuint VAO = 0, VBO = 0, EBO = 0;	// vertex array, vertex buffer, element buffer
 GLuint program = 0;					// shader program ID
-vec2 mouseNow;  // current mouse position
+int winWidth = 800, winHeight = 800;
+Camera camera(0, 0, winWidth, winHeight, vec3(15, -30, 0), vec3(0, 0, -5), 30);
 
 // a triangle (3 2D locations, 3 RGB colors)
-vec2 points[] = {
-    {50, 350},   // v0 top-left
-    {200, 350},  // v1 top-right curve
-    {240, 280},  // v2 upper-right
-    {240, 120},  // v3 lower-right
-    {200, 50},   // v4 bottom-right curve
-    {50, 50},    // v5 bottom-left
-    {125, 200}   // v6 center point
+vec3 points[] = {
+    {50, 350, 0},   // v0 top-left
+    {200, 350, 0},  // v1 top-right curve
+    {240, 280, 0},  // v2 upper-right
+    {240, 120, 0},  // v3 lower-right
+    {200, 50, 0},   // v4 bottom-right curve
+    {50, 50, 0},    // v5 bottom-left
+    {125, 200, 0},   // v6 center point
+
+		// back face
+	{50, 350, -50},   // v7
+	{200, 350, -50},  // v8
+	{240, 280, -50},  // v9
+	{240, 120, -50},  // v10
+	{200, 50, -50},   // v11
+	{50, 50, -50},    // v12
+	{125, 200, -50}   // v13
 };
 
 vec3 colors[] = {
@@ -29,11 +43,20 @@ vec3 colors[] = {
 	{1, 1, 0},   // v3 yellow
 	{1, 0, 1},   // v4 magenta
 	{0, 1, 1},   // v5 cyan
-	{0.5, 0.5, 0.5} // v6 gray for center
+	{0.5, 0.5, 0.5}, // v6 gray for center
+
+		// back face
+	{1, 0, 0},
+	{0, 1, 0},
+	{0, 0, 1},
+	{1, 1, 0},
+	{1, 0, 1},
+	{0, 1, 1},
+	{0.5, 0.5, 0.5}
 };
 
 // number of vertices in points array
-const int nPoints = sizeof(points)/sizeof(vec2);
+const int nPoints = sizeof(points)/sizeof(vec3);
 
 int triangles[][3] = {
 	{0, 1, 6},   // top triangle
@@ -42,7 +65,39 @@ int triangles[][3] = {
 	{3, 4, 6},   // lower-right
 	{4, 5, 6},   // bottom
 	{5, 0, 6},   // left side
-	{0, 6, 5}    // extra fill for coverage
+
+		// back (reversed, offset by 7)
+	{7, 13, 8},
+	{8, 13, 9},
+	{9, 13, 10},
+	{10, 13, 11},
+	{11, 13, 12},
+	{12, 13, 7},
+
+		// sides
+		// edge 0-1
+	{0, 1, 7},
+	{7, 1, 8},
+
+		// edge 1-2
+	{1, 2, 8},
+	{8, 2, 9},
+
+		// edge 2-3
+	{2, 3, 9},
+	{9, 3, 10},
+
+		// edge 3-4
+	{3, 4, 10},
+	{10, 4, 11},
+
+		// edge 4-5
+	{4, 5, 11},
+	{11, 5, 12},
+
+		// edge 5-0
+	{5, 0, 12},
+	{12, 0, 7}
 };
 
 // number of triangle indices (used for drawing)
@@ -50,42 +105,96 @@ const int nTriangles = sizeof(triangles)/sizeof(triangles[0]);
 
 const char *vertexShader = R"(
 	#version 410 core				// 130 for Windows
-	in vec2 point;
+	in vec3 point;
 	in vec3 color;
 	out vec3 vColor;
-	uniform mat4 view;
+	out vec3 vPoint;
+	uniform mat4 modelview, persp;
 
 	void main() {
-		gl_Position = view*vec4(point, 0, 1);
+		vPoint = (modelview*vec4(point, 1)).xyz;
+		gl_Position = persp*vec4(vPoint, 1);
 		vColor = color;
 	}
 )";
 
 const char *pixelShader = R"(
-	#version 410 core				// 130 for Windows
+	#version 410 core
 	in vec3 vColor;
+	in vec3 vPoint;
+
 	out vec4 pColor;
+
+	uniform vec3 light = vec3(1, 1, 1);
+	uniform float amb = .1, dif = .8, spc = .7;
+
 	void main() {
-		pColor = vec4(vColor, 1);	// 1: fully opaque
+		vec3 dx = dFdx(vPoint), dy = dFdy(vPoint);
+		vec3 N = normalize(cross(dx, dy));
+
+		vec3 L = normalize(light - vPoint);
+		float d = abs(dot(N, L));
+
+		vec3 E = normalize(vPoint);
+		vec3 R = reflect(L, N);
+
+		float h = max(0, dot(R, E));
+		float s = pow(h, 100);
+
+		float intensity = min(1.0, amb + dif*d) + spc*s;
+
+		pColor = vec4(intensity * vColor, 1);
 	}
 )";
+
+void Resize(int width, int height) {
+	glViewport(0, 0, width, height);
+	camera.Resize(width, height);
+}
 
 void Display() {
 	// clear background
 	glClearColor(1, 1, 1, 1);
-	glClear(GL_COLOR_BUFFER_BIT);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glEnable(GL_DEPTH_TEST);
 	// run shader program, enable GPU vertex buffer
 	glUseProgram(program);
 	// create rotation matrix from mouse position and send to shader
-	mat4 view = RotateY(mouseNow.x)*RotateX(mouseNow.y);
-	SetUniform(program, "view", view);
+	SetUniform(program, "modelview", camera.modelview);
+	SetUniform(program, "persp", camera.persp);
 	glBindBuffer(GL_ARRAY_BUFFER, VBO);
 	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, EBO);
 	// connect GPU point and color buffers to shader inputs
-	VertexAttribPointer(program, "point", 2, 0, (void *) 0);
+	VertexAttribPointer(program, "point", 3, 0, (void *) 0);
 	VertexAttribPointer(program, "color", 3, 0, (void *) sizeof(points));
 	// draw all triangle indices from EBO
 	glDrawElements(GL_TRIANGLES, 3*nTriangles, GL_UNSIGNED_INT, 0);
+	bool showDiagnostics = false;
+	if (showDiagnostics) {
+		UseDrawShader(camera.fullview); // needs camera
+
+		// draw/label triangles
+		int nTri = sizeof(triangles)/(3*sizeof(int));
+		for (int i = 0; i < nTri; i++) {
+			int3 t = triangles[i];
+			vec3 p1 = points[t.i1], p2 = points[t.i2], p3 = points[t.i3], c = (p1+p2+p3)/3;
+			vec3 c1 = colors[t.i1], c2 = colors[t.i2], c3 = colors[t.i3];
+			Line(p1, p2, 2, c1, c2);
+			Line(p2, p3, 2, c2, c3);
+			Line(p3, p1, 2, c3, c1);
+			Text(c, camera.fullview, vec3(0, 0, 1), 16, "t%i", i);
+		}
+
+		// draw/label vertices
+		for (int i = 0; i < nPoints; i++) {
+			Disk(points[i], 8, colors[i]);
+			Text(points[i], camera.fullview, colors[i], 16, " v%i", i);
+		}
+	}
+	// adding arcball draw
+	glDisable(GL_DEPTH_TEST);
+	if (camera.down)
+		camera.Draw();
 	glFlush();
 }
 
@@ -109,25 +218,23 @@ void BufferVertices() {
 	glBufferData(GL_ELEMENT_ARRAY_BUFFER, 3*nTriangles*sizeof(int), triangles, GL_STATIC_DRAW);
 }
 
-// scale and center points so letter fits in window
-void StandardizePoints(float s = .8f) {
-	vec2 min, max;
-	float range = Bounds(points, nPoints, min, max);
-	float scale = 2*s/range;
-	vec2 center = (min+max)/2;
-	for (int i = 0; i < nPoints; i++)
-		points[i] = scale*(points[i]-center);
-}
-
 // update mouse position while left button is held down
 void MouseMove(float x, float y, bool leftDown, bool rightDown) {
 	if (leftDown)
-		mouseNow = vec2(x, y);
+		camera.Drag(x, y);
+}
+
+// adding mouse button ability with camera
+void MouseButton(float x, float y, bool left, bool down) {
+	if (left && down)
+		camera.Down(x, y, Shift(), Control());
+	else
+		camera.Up();
 }
 
 int main() {
-	// initialize window
-	GLFWwindow *w = InitGLFW(100, 100, 800, 800, "Colorful Triangle");
+	// updated window
+	GLFWwindow *w = InitGLFW(100, 100, winWidth, winHeight, "3-Assn-Shade3DLetter");
 	program = LinkProgramViaCode(&vertexShader, &pixelShader);
 	if (!program) {
 		printf("can't init shader program\n");
@@ -135,10 +242,12 @@ int main() {
 		return 0;
 	}
 	// fit letter into OpenGL view
-	StandardizePoints(.8f);
+	Standardize(points, nPoints, .8f);
 	// allocate GPU vertex memory
 	BufferVertices();
 	RegisterMouseMove(MouseMove);
+	RegisterMouseButton(MouseButton);
+	RegisterResize(Resize);
 	// event loop
 	while (!glfwWindowShouldClose(w)) {
 		Display();
