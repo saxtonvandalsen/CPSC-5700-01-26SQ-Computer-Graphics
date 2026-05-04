@@ -22,7 +22,7 @@ vector<vec3> normals;
 vector<vec2> uvs;
 vector<int3> triangles;
 
-// file path for handbag.obj
+// file path for the object and texture image
 const char *objFilename = "/Users/saxtonvandalsen/Graphics/Apps/Handbag.obj";
 const char *textureFilename = "/Users/saxtonvandalsen/Graphics/Apps/brown.png";
 GLuint textureName = 0; // id for texture image
