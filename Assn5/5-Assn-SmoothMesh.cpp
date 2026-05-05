@@ -166,7 +166,7 @@ void MouseButton(float x, float y, bool left, bool down) {
 
 int main() {
 	// updated window
-	GLFWwindow *w = InitGLFW(100, 100, winWidth, winHeight, "4-Assn-Texture3DLetter");
+	GLFWwindow *w = InitGLFW(100, 100, winWidth, winHeight, "5-Assn-SmoothMesh");
 	program = LinkProgramViaCode(&vertexShader, &pixelShader);
 	if (!program) {
 		printf("can't init shader program\n");
