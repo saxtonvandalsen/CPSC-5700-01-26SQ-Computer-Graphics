@@ -17,12 +17,15 @@ vec3		red(1, 0, 0), blu(0, 0, 1), grn(.1f, .5f, .1f), mag(1, 0, 1);
 vec3		lights[] = { {1.3f, -.4f, .45f}, {-.4f, .6f, 1.f}, {.02f, .01f, .85f} };
 const int	nLights = sizeof(lights)/sizeof(vec3);
 
+// Animation timing
+float startTime = (float) glfwGetTime();
+float duration = 3;
+
 // Interaction
 Mover		mover;
 void	   *picked = NULL;
 
 // Mesh Class and Airplane
-
 struct MeshS {
 	vector<vec3> points, normals;
 	vector<int3> triangles;
@@ -100,15 +103,81 @@ struct MeshS {
 	}
 };
 
-// Flight Path
+MeshS body, prop;
 
-// TODO: Bezier Class, Flight Path Control Points
+// Flight Path
+vec3 path[] = {
+	{2/3.f,0,2/3.f},    {1,0,1/3.f},    {1,.1f,-1/3.f},
+	{2/3.f,.1f,-2/3.f}, {1/3.f,.1f,-1}, {-1/3.f,.4f,-1},
+	{-2/3.f,.4f,-2/3.f}, {-1,.4f,-1/3.f}, {-1,0,1/3.f},
+	{-2/3.f,0,2/3.f},   {-1/3.f,0,1},   {1/3.f,0,1},
+	{2/3.f,0,2/3.f}
+};
+
+class Bezier {
+public:
+	vec3 *pts = NULL; // *pts is beginning of 4 points defining the curve
+
+	Bezier(vec3 *pts) : pts(pts) { }
+
+	vec3 Position(float t) {
+		float s = 1-t;
+		return s*s*s*pts[0]+3*s*s*t*pts[1]+3*s*t*t*pts[2]+t*t*t*pts[3];
+	}
+
+	vec3 Velocity(float t) {
+		float t2 = t*t;
+		return (-3*t2+6*t-3)*pts[0]+(9*t2-12*t+3)*pts[1]+(6*t-9*t2)*pts[2]+3*t2*pts[3];
+	}
+
+	mat4 Frame(float t) {
+		vec3 p = Position(t);
+		vec3 v = normalize(Velocity(t));
+		vec3 n = normalize(cross(v, vec3(0, 1, 0)));
+		vec3 b = normalize(cross(n, v));
+
+		mat4 frame {
+				{n[0], b[0], -v[0], p[0]},
+				{n[1], b[1], -v[1], p[1]},
+				{n[2], b[2], -v[2], p[2]},
+				{0,    0,    0,     1}
+		};
+
+		return frame;
+	}
+
+	void Draw(int res = 50, float lineWidth = 3) {
+		glLineWidth(lineWidth);
+		for (int i = 0; i < res; i++) {
+			float t1 = (float) i/res;
+			float t2 = (float) (i+1)/res;
+			Line(Position(t1), Position(t2), lineWidth, mag);
+		}
+	}
+};
+
+Bezier bezier[] = {
+	Bezier(&path[0]),
+	Bezier(&path[3]),
+	Bezier(&path[6]),
+	Bezier(&path[9])
+};
+
+int nBezier = sizeof(bezier)/sizeof(Bezier);
 
 // Animation
-
 void Animate() {
-	// TODO: compute elapsed time, compute frame on path
-	// TODO: transform body to path, transform propeller to body
+	float elapsed = (float) glfwGetTime()-startTime;
+	float alpha = nBezier*elapsed/duration;
+
+	float beta = fmod(alpha, (float) nBezier);
+	float t = beta-floor(beta);
+	int i = (int) floor(beta);
+
+	mat4 f = bezier[i].Frame(t);
+
+	body.toWorld = f*Scale(.35f)*RotateY(-90);
+	prop.toWorld = body.toWorld*Translate(-.6f,0,0)*RotateY(-90)*Scale(.25f)*RotateZ(1500*elapsed);
 }
 
 // Display
@@ -122,7 +191,10 @@ void Display() {
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glEnable(GL_LINE_SMOOTH);
 	glHint(GL_LINE_SMOOTH_HINT, GL_NICEST);
-	// TODO: display airplane, display flight path
+	body.Render(vec3(.55f, .25f, .12f)); // brown airplane body
+	prop.Render(vec3(0, .7f, 0));        // green propeller
+	for (int i = 0; i < nBezier; i++)
+		bezier[i].Draw();
 	// lights
 	UseDrawShader(camera.fullview);
 	for (vec3 &l : lights)
@@ -173,7 +245,9 @@ void Resize(int width, int height) {
 int main() {
 	// init app window and GL context
 	GLFWwindow *w = InitGLFW(100, 100, winW, winH, "Animate");
-	// TODO: read meshes
+	// read meshes
+	body.Read("../Airplane-Body.obj");
+	prop.Read("../Airplane-Propeller.obj");
 	// callbacks
 	RegisterMouseButton(MouseButton);
 	RegisterMouseMove(MouseMove);
